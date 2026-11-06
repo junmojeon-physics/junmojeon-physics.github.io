@@ -1,0 +1,1495 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tiling Go — Penrose + Ammann-Beenker</title>
+<style>
+:root{
+  --bg:#111315; --panel:#1a1e22; --panel2:#242a30; --text:#eef2f4;
+  --muted:#adb5bc; --wood:#c99d63; --input:#101418; --line:#70583b;
+}
+body.light{
+  --bg:#f3f5f7; --panel:#ffffff; --panel2:#f4f6f8; --text:#182026;
+  --muted:#65717b; --wood:#d2aa72; --input:#ffffff; --line:#6f5638;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+#app{height:100vh;display:grid;grid-template-columns:minmax(0,1fr) 388px}
+#stage{position:relative;background:var(--wood);overflow:hidden;min-width:0}
+canvas{width:100%;height:100%;display:block;touch-action:none;cursor:crosshair}
+#hud{
+  position:absolute;left:12px;top:12px;background:#101820cc;border:1px solid #ffffff18;
+  border-radius:10px;padding:8px 10px;font-size:12px;backdrop-filter:blur(4px)
+}
+aside{background:var(--panel);border-left:1px solid #ffffff14;padding:15px;overflow:auto}
+h1{margin:0 0 4px;font-size:18px}
+.sub{color:var(--muted);font-size:12px;margin-bottom:14px}
+.card{background:var(--panel2);border:1px solid #ffffff10;border-radius:12px;padding:12px;margin-bottom:12px}
+.row{display:flex;justify-content:space-between;gap:8px;margin:6px 0}
+label{display:block;font-size:12px;color:var(--muted);margin-top:8px}
+input,select,button{width:100%;padding:10px 11px;border:0;border-radius:9px;margin-top:5px;font:inherit}
+input,select{background:var(--input);color:var(--text);border:1px solid #ffffff16}
+button{background:#38414a;color:white;font-weight:700}
+button.primary{background:#8b6230}
+button.secondary{background:#555f69}
+button.score{background:#466349}
+button.finish{background:#35606e}
+button.resume{background:#5d5a3d}
+button.danger{background:#60343a}
+button:disabled{opacity:.55}
+.status{min-height:44px;color:#ffe4aa;font-size:13px}
+.dot{display:inline-block;width:13px;height:13px;border-radius:50%;vertical-align:-2px;margin-right:6px;border:1px solid #0008}
+.black{background:#111}.white{background:#f5f2e9}
+.small{font-size:12px;color:var(--muted)}
+.help{font-size:12px;color:#c4c9ce;line-height:1.5}
+.sectionTitle{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:#bfc6cc;margin-bottom:8px}
+hr{border:none;border-top:1px solid #ffffff12;margin:12px 0}
+details{background:#101418;border:1px solid #ffffff10;border-radius:10px;padding:8px 10px;margin-top:8px}
+summary{cursor:pointer;font-weight:700}
+.estimate{
+  background:#11161a;border:1px solid #ffffff10;border-radius:9px;padding:9px;margin-top:8px
+}
+.estimateLead{font-size:16px;font-weight:800;margin-top:6px;color:#ffe4aa}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.badge{
+  display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;
+  background:#101418;border:1px solid #ffffff10;color:#d9dee2
+}
+
+body.light aside{border-left-color:#00000018}
+body.light .card{border-color:#00000012}
+body.light details{background:#ffffff;border-color:#00000012}
+body.light .estimate{background:#ffffff;border-color:#00000012}
+body.light button{background:#dfe4e8;color:#172026}
+body.light button.primary{background:#b98442;color:#111}
+body.light button.secondary{background:#cfd6dc;color:#172026}
+body.light button.score{background:#b7d0bb;color:#172026}
+body.light button.finish{background:#b9d4dc;color:#172026}
+body.light button.resume{background:#d6d0ae;color:#172026}
+body.light button.danger{background:#dfbfc2;color:#3a171a}
+body.light .badge{background:#f8fafb;border-color:#00000012;color:#273138}
+body.light #hud{background:#ffffffd9;color:#1d252b;border-color:#00000018}
+
+@media(max-width:980px){
+  #app{grid-template-columns:1fr;grid-template-rows:minmax(0,1fr) auto}
+  aside{border-left:0;border-top:1px solid #ffffff14;max-height:56vh}
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="stage">
+    <canvas id="board"></canvas>
+    <div id="hud">클릭/탭: 착수 · 드래그: 이동 · 휠/핀치: 확대/축소</div>
+  </div>
+
+  <aside>
+    <h1>Tiling Go</h1>
+    <div class="sub">Penrose P3 + Ammann–Beenker · AI / local manual · shaped random patches</div>
+
+    <div class="card">
+      <div class="sectionTitle">Game mode</div>
+      <label for="gameModeSelect">Mode</label>
+      <select id="gameModeSelect">
+        <option value="ai">Vs AI — Human Black / AI White</option>
+        <option value="local">Local manual — single / friend, alternating Black & White</option>
+      </select>
+      <div class="small" id="modeNote" style="margin-top:6px">
+        AI mode: you play Black; White is controlled by the heuristic AI.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="sectionTitle">Appearance</div>
+      <label for="themeSelect">Theme</label>
+      <select id="themeSelect">
+        <option value="dark">Dark mode</option>
+        <option value="light">Light mode</option>
+      </select>
+      <div class="small" id="themeNote" style="margin-top:6px">
+        Dark mode uses a dark interface; Light mode switches the panels and controls to a bright theme.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="sectionTitle">Scoring rules</div>
+      <label for="rulesSelect">Rules</label>
+      <select id="rulesSelect">
+        <option value="territory">Korean / Japanese — territory scoring, komi 6.5</option>
+        <option value="area">Chinese — area scoring, komi 7.5</option>
+      </select>
+      <div class="small" id="rulesNote" style="margin-top:6px">
+        Territory scoring: territory + captured/dead stones; komi 6.5.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="sectionTitle">Board generation</div>
+
+      <label for="tilingSelect">Tiling</label>
+      <select id="tilingSelect">
+        <option value="penrose">Penrose P3 (rhombus)</option>
+        <option value="ab">Ammann–Beenker</option>
+      </select>
+
+      <label for="radiusInput">Standard-board radius</label>
+      <input id="radiusInput" type="number" min="4" step="1" value="10">
+      <button class="primary" id="fixedBtn">Generate standard board</button>
+
+      <hr>
+
+      <label for="giantRadiusInput">Giant-tiling radius</label>
+      <input id="giantRadiusInput" type="number" min="12" step="1" value="24">
+
+      <label for="minSitesInput">Minimum sites for random patch</label>
+      <input id="minSitesInput" type="number" min="360" step="1" value="360">
+
+      <label for="shapeSelect">Random patch shape</label>
+      <select id="shapeSelect">
+        <option value="circle">Circle</option>
+        <option value="square">Square</option>
+        <option value="polygon">Regular polygon</option>
+      </select>
+
+      <div id="polygonSidesWrap">
+        <label for="polygonSidesInput">Polygon sides</label>
+        <input id="polygonSidesInput" type="number" min="5" max="12" step="1" value="6">
+      </div>
+
+      <button class="secondary" id="randomBtn">Generate random patch</button>
+      <button id="rerandomBtn">Another random patch</button>
+    </div>
+
+    <div class="card">
+      <div class="sectionTitle">Current board</div>
+      <div class="row"><span>Tiling</span><b id="boardKind">-</b></div>
+      <div class="row"><span>Mode</span><b id="boardMode">-</b></div>
+      <div class="row"><span>Shape</span><b id="boardShape">-</b></div>
+      <div class="row"><span>Sites</span><b id="siteCount">-</b></div>
+      <div class="row"><span>Edges</span><b id="edgeCount">-</b></div>
+      <div class="row"><span>Extra</span><b id="boardExtra">-</b></div>
+      <div class="row"><span>Rules</span><b id="currentRules">Territory 6.5</b></div>
+    </div>
+
+    <div class="card">
+      <div class="sectionTitle">Game</div>
+      <div class="row"><span>Move</span><b id="moveNo">0</b></div>
+      <div class="row"><span>Turn</span><b><span id="turnDot" class="dot black"></span><span id="turnText">Black</span></b></div>
+      <div class="row"><span>Captured by Black</span><b id="capB">0</b></div>
+      <div class="row"><span>Captured by White</span><b id="capW">0</b></div>
+      <div class="row"><span>Passes</span><b id="passes">0</b></div>
+      <div class="row"><span>Scoring state</span><b id="scoringState">Playing</b></div>
+      <div class="status" id="status">Black to play.</div>
+
+      <button class="primary" id="passBtn">Pass</button>
+      <button class="score" id="scoreReviewBtn">Enter score review</button>
+      <div class="grid2">
+        <button class="finish" id="finalizeBtn">Finalize score</button>
+        <button class="resume" id="resumeBtn">Resume play</button>
+      </div>
+      <button id="undoBtn">Undo</button>
+      <button id="fitBtn">Fit board</button>
+      <button class="danger" id="newBtn">New game</button>
+      <div class="small" style="margin-top:7px">
+        In score review, click a connected group to mark or unmark it as dead.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="sectionTitle">Position / Score panel</div>
+      <div class="estimate">
+        <div class="row"><span>Black score / estimate</span><b id="panelB">0.0</b></div>
+        <div class="row"><span>White score / estimate</span><b id="panelW">6.5</b></div>
+        <div class="row"><span>Neutral / unsettled</span><b id="panelN">0</b></div>
+        <div class="row"><span>Dead black</span><b id="panelDeadB">0</b></div>
+        <div class="row"><span>Dead white</span><b id="panelDeadW">0</b></div>
+        <div class="row"><span>Panel mode</span><b id="panelMode"><span class="badge">Estimate</span></b></div>
+        <div class="estimateLead" id="panelLead">White +6.5</div>
+      </div>
+      <button id="estimateBtn">Refresh panel</button>
+      <div class="small" style="margin-top:7px">
+        Normal play shows a rough positional estimate. In score review / final scoring,
+        territory is shown on the board and groups marked dead are drawn with a red X.
+      </div>
+    </div>
+
+    <div class="card help">
+      <div class="sectionTitle">Explanation / 説明</div>
+
+      <details open>
+        <summary>한국어</summary>
+                <div style="margin-top:8px">
+          이 프로그램은 <b>Penrose P3</b>와 <b>Ammann–Beenker</b> 타일링의 실제 꼭짓점과 실제 타일 edge를 이용해 바둑을 둘 수 있도록 만든 버전입니다.
+          각 꼭짓점은 착점이고, 두 꼭짓점이 같은 타일의 변으로 연결되어 있을 때만 서로 인접한 것으로 취급됩니다.<br><br>
+
+          <b>1. Game mode</b><br>
+          <b>Vs AI</b>에서는 사용자가 흑, AI가 백을 둡니다.
+          <b>Local manual</b>에서는 AI가 완전히 꺼지고 흑과 백이 자동으로 번갈아 차례를 갖습니다.
+          따라서 혼자 양쪽 수를 직접 두면서 연구용으로 국면을 만들 수도 있고, 친구와 같은 화면에서 번갈아 둘 수도 있습니다.<br><br>
+
+          <b>2. Board generation</b><br>
+          <b>Generate standard board</b>는 중심부의 표준적인 유한 patch를 만듭니다.
+          <b>Generate random patch</b>는 훨씬 큰 Penrose 또는 Ammann–Beenker tiling을 먼저 생성한 뒤,
+          그 내부의 임의 위치를 중심으로 일부를 잘라 새로운 반면을 만듭니다.
+          Random patch는 <b>Circle</b>, <b>Square</b>, <b>Regular polygon</b> 중에서 고를 수 있고,
+          polygon의 경우 변의 개수도 지정할 수 있습니다.
+          최소 site 수를 360 이상으로 지정하면 해당 조건을 만족할 때까지 patch 크기를 자동으로 키웁니다.
+          경계에서 생긴 degree-1 꼭짓점은 제거하고 마지막에는 가장 큰 연결 성분만 남깁니다.<br><br>
+
+          <b>3. Rules and scoring</b><br>
+          착수, 연결된 돌무리, liberty, 포획, 자살수 금지, positional superko를 구현했습니다.
+          계가 규칙은 두 가지를 선택할 수 있습니다.
+          <b>Korean / Japanese</b>는 territory scoring으로, 흑과 백의 <b>집 + 잡은 돌 + 죽은 상대 돌</b>을 계산하며 백 komi는 6.5입니다.
+          <b>Chinese</b>는 area scoring으로, <b>살아 있는 자기 돌 + 자기 영역</b>을 계산하며 백 komi는 7.5입니다.<br><br>
+
+          <b>4. Score review와 죽은돌</b><br>
+          <b>Enter score review</b>를 누르면 대국을 즉시 끝내는 대신 계가 검토 모드로 들어갑니다.
+          이 상태에서는 반상 위의 연결된 돌무리를 클릭해 죽은돌로 표시하거나 다시 살릴 수 있습니다.
+          죽은돌은 반투명으로 표시되고 빨간 X가 겹쳐 보입니다.
+          검토 모드에서는 흑집과 백집 marker도 반상 위에 직접 표시됩니다.
+          검토가 끝나면 <b>Finalize score</b>로 최종 점수를 확정하고,
+          아직 더 두고 싶다면 <b>Resume play</b>로 다시 대국으로 돌아갈 수 있습니다.
+          두 번 연속 pass해도 자동으로 score review에 들어갑니다.<br><br>
+
+          <b>5. Position estimate</b><br>
+          평상시 패널의 형세판단은 최종 계가가 아니라 <b>대략적인 추정</b>입니다.
+          현재 놓인 돌을 직접 세고, 빈 site는 그래프상의 거리 기반 영향력을 이용해 흑/백/중립으로 나눕니다.
+          사활을 완전히 푸는 기능은 아니므로 복잡한 국면에서는 실제 결과와 차이가 날 수 있습니다.
+          Score review에 들어가면 이 패널은 추정값 대신 실제 계가 결과를 보여줍니다.<br><br>
+
+          <b>6. 화면 조작</b><br>
+          빈 착점을 클릭하면 돌을 놓고, 드래그하면 반면을 이동하며, 마우스 휠로 확대/축소할 수 있습니다.
+          <b>Fit board</b>는 현재 반면 전체가 화면에 들어오도록 자동으로 맞춥니다.
+          <b>Undo</b>는 직전 수를 되돌리며, AI 모드에서는 사람이 다시 둘 차례가 되도록 필요한 수만큼 되돌립니다.<br><br>
+
+          <b>7. Light / Dark mode</b><br>
+          <b>Appearance</b> 메뉴에서 <b>Dark mode</b>와 <b>Light mode</b>를 선택할 수 있습니다.
+          이 기능은 반면의 기하학이나 규칙에는 영향을 주지 않고, 패널·입력창·버튼·보드 배경의 시각적 테마만 바꿉니다.
+          밝은 환경에서는 Light mode, 어두운 환경에서는 Dark mode를 사용하면 가독성이 좋아집니다.
+        </div>
+      </details>
+
+      <details>
+        <summary>English</summary>
+                <div style="margin-top:8px">
+          This program lets you play Go on the actual vertex-edge graphs of <b>Penrose P3</b> and <b>Ammann–Beenker</b> tilings.
+          Each tile vertex is a playable point, and two points are adjacent only when they are connected by an actual tile edge.<br><br>
+
+          <b>1. Game mode</b><br>
+          In <b>Vs AI</b>, you play Black and the heuristic AI plays White.
+          In <b>Local manual</b>, the AI is completely disabled and Black/White alternate automatically.
+          This is useful either for playing locally with a friend or for manually constructing positions by yourself.<br><br>
+
+          <b>2. Board generation</b><br>
+          <b>Generate standard board</b> creates a finite central patch.
+          <b>Generate random patch</b> first generates a much larger Penrose or Ammann–Beenker tiling and then cuts out a board around a randomly selected interior position.
+          The patch can be a <b>circle</b>, <b>square</b>, or <b>regular polygon</b>; polygon mode also lets you choose the number of sides.
+          If a minimum site count such as 360 is requested, the patch is enlarged automatically until the requirement is satisfied.
+          Degree-1 boundary vertices are pruned, and only the largest connected component is retained.<br><br>
+
+          <b>3. Rules and scoring</b><br>
+          The program implements legal moves, connected groups, liberties, captures, suicide prevention, and positional superko.
+          Two scoring systems are available.
+          <b>Korean / Japanese</b> uses territory scoring: <b>territory + prisoners + marked dead opponent stones</b>, with White komi 6.5.
+          <b>Chinese</b> uses area scoring: <b>living stones + controlled territory</b>, with White komi 7.5.<br><br>
+
+          <b>4. Score review and dead stones</b><br>
+          Press <b>Enter score review</b> to inspect the final position before fixing the result.
+          In score review, click any connected group to mark or unmark it as dead.
+          Dead stones become semi-transparent and are overlaid with a red X.
+          Black and White territory markers are also shown directly on the board.
+          Press <b>Finalize score</b> to lock in the result, or <b>Resume play</b> to continue the game.
+          Two consecutive passes also enter score review automatically.<br><br>
+
+          <b>5. Position estimate</b><br>
+          During ordinary play, the panel shows a <b>rough positional estimate</b>, not a full life-and-death solution.
+          Stones are counted directly, while empty sites are provisionally assigned by graph-distance influence to Black, White, or neutral.
+          Therefore unsettled positions can differ substantially from the true final score.
+          Once score review is entered, the panel switches from estimation to the reviewed scoring result.<br><br>
+
+          <b>6. Board controls</b><br>
+          Click an empty vertex to play, drag to pan, and use the mouse wheel to zoom.
+          <b>Fit board</b> rescales the full board to fit the viewport.
+          <b>Undo</b> reverts the latest move; in AI mode it rewinds far enough to return control to the human player.<br><br>
+
+          <b>7. Light / Dark mode</b><br>
+          Use the <b>Appearance</b> menu to switch between <b>Dark mode</b> and <b>Light mode</b>.
+          This does not change the board geometry, game state, or scoring rules; it only changes the visual theme of the panels, controls, text, and board background.
+          Light mode is often easier to read in bright environments, while Dark mode is more comfortable in dim environments.
+        </div>
+      </details>
+
+      <details>
+        <summary>日本語</summary>
+                <div style="margin-top:8px">
+          このプログラムでは、<b>Penrose P3</b> および <b>Ammann–Beenker</b> タイリングの実際の頂点・辺グラフ上で碁を打つことができます。
+          各タイルの頂点を着点とし、実際のタイルの辺で結ばれている頂点同士だけを隣接点として扱います。<br><br>
+
+          <b>1. Game mode</b><br>
+          <b>Vs AI</b> ではユーザーが黒、ヒューリスティック AI が白を打ちます。
+          <b>Local manual</b> では AI は完全に無効になり、黒と白の手番が自動的に交互に切り替わります。
+          そのため、友人と同じ画面で対局する用途にも、一人で両方の色を操作して局面を作る用途にも使えます。<br><br>
+
+          <b>2. Board generation</b><br>
+          <b>Generate standard board</b> は中心付近の有限パッチを生成します。
+          <b>Generate random patch</b> は、まずより大きな Penrose または Ammann–Beenker タイリングを生成し、
+          その内部からランダムな位置を選んで盤面を切り出します。
+          パッチ形状は <b>Circle</b>、<b>Square</b>、<b>Regular polygon</b> から選択でき、
+          polygon の場合は辺の数も指定できます。
+          最小 site 数を 360 などに設定すると、その条件を満たすまでパッチサイズを自動的に拡大します。
+          境界に生じた degree-1 頂点は除去し、最後に最大の連結成分のみを残します。<br><br>
+
+          <b>3. Rules and scoring</b><br>
+          着手、連結グループ、liberty、取り、自殺手禁止、positional superko を実装しています。
+          計算方式は 2 種類から選べます。
+          <b>Korean / Japanese</b> は territory scoring で、<b>地 + 取った石 + 死に石</b>を数え、白コミは 6.5目です。
+          <b>Chinese</b> は area scoring で、<b>生きている自分の石 + 自分の領域</b>を数え、白コミは 7.5目です。<br><br>
+
+          <b>4. Score review と死に石</b><br>
+          <b>Enter score review</b> を押すと、最終結果を確定する前の確認モードに入ります。
+          この状態では、連結した石のグループをクリックして死に石としてマークしたり、元に戻したりできます。
+          死に石は半透明表示になり、赤い X が重ねて表示されます。
+          また、黒地・白地の marker も盤上に直接表示されます。
+          <b>Finalize score</b> で結果を確定し、まだ続けたい場合は <b>Resume play</b> で対局に戻れます。
+          2 回連続で pass した場合も自動的に score review に入ります。<br><br>
+
+          <b>5. Position estimate</b><br>
+          通常対局中のパネルは、最終計算ではなく <b>概算の形勢判断</b>です。
+          現在の石はそのまま数え、空点はグラフ距離に基づく influence によって黒・白・中立へ暫定分類します。
+          生死判定を完全に解く機能ではないため、未確定な局面では実際の最終結果と大きく異なる場合があります。
+          Score review に入ると、パネルは概算ではなく実際の計算結果を表示します。<br><br>
+
+          <b>6. Board controls</b><br>
+          空いている頂点をクリックすると着手し、ドラッグで盤面を移動し、マウスホイールで拡大・縮小できます。
+          <b>Fit board</b> は盤面全体が画面に収まるよう自動調整します。
+          <b>Undo</b> は直前の手を戻し、AI モードでは再びユーザーの手番になるところまで必要な分だけ戻します。<br><br>
+
+          <b>7. Light / Dark mode</b><br>
+          <b>Appearance</b> メニューから <b>Dark mode</b> と <b>Light mode</b> を切り替えられます。
+          この機能は盤面の幾何、局面、ルールには影響せず、パネル・入力欄・ボタン・文字・盤面背景などの見た目だけを変更します。
+          明るい環境では Light mode、暗い環境では Dark mode を使うと見やすくなります。
+        </div>
+      </details>
+    </div>
+  </aside>
+</div>
+
+<script>
+"use strict";
+
+/* ---------- geometry ---------- */
+const QEPS = 1e-3;
+const TOL = 1e-4;
+
+const TILINGS = {
+  penrose: {
+    label: "Penrose P3",
+    dirs: Array.from({length:5}, (_,j)=>[
+      Math.cos(2*Math.PI*j/5), Math.sin(2*Math.PI*j/5)
+    ]),
+    gamma: [0.2,0.2,0.2,0.2,0.2],
+    defaultRadius: 10
+  },
+  ab: {
+    label: "Ammann–Beenker",
+    dirs: Array.from({length:4}, (_,j)=>[
+      Math.cos(Math.PI*j/4), Math.sin(Math.PI*j/4)
+    ]),
+    gamma: [0.21,0.37,0.09,0.28],
+    defaultRadius: 10
+  }
+};
+
+const graphCache = new Map();
+
+function makeRhombPolys(kind, radius){
+  const info = TILINGS[kind];
+  const dirs = info.dirs, gamma = info.gamma;
+  const nfam = dirs.length;
+  const lineRange = Math.ceil(radius) + 3;
+  const polys = [];
+
+  for(let r=0;r<nfam;r++){
+    for(let s=r+1;s<nfam;s++){
+      const det = dirs[r][0]*dirs[s][1] - dirs[r][1]*dirs[s][0];
+      if(Math.abs(det) < 1e-9) continue;
+
+      for(let kr=-lineRange; kr<=lineRange; kr++){
+        const ar = kr - gamma[r];
+        for(let ks=-lineRange; ks<=lineRange; ks++){
+          const as_ = ks - gamma[s];
+          const px = (ar*dirs[s][1] - as_*dirs[r][1]) / det;
+          const py = (as_*dirs[r][0] - ar*dirs[s][0]) / det;
+
+          const k = [];
+          for(let j=0;j<nfam;j++){
+            k[j] = Math.floor(dirs[j][0]*px + dirs[j][1]*py + gamma[j]);
+          }
+          k[r] = kr - 1;
+          k[s] = ks - 1;
+
+          const poly = [];
+          for(const [dr,ds] of [[0,0],[1,0],[1,1],[0,1]]){
+            const kk = k.slice();
+            kk[r] += dr; kk[s] += ds;
+            let x = 0, y = 0;
+            for(let j=0;j<nfam;j++){
+              x += kk[j]*dirs[j][0];
+              y += kk[j]*dirs[j][1];
+            }
+            poly.push([x,y]);
+          }
+          polys.push(poly);
+        }
+      }
+    }
+  }
+  return polys;
+}
+
+function buildVertexGraph(polygons){
+  const index = new Map(), coords = [], edgeSet = new Set();
+
+  function vid(p){
+    const qx = Math.round(p[0]/QEPS), qy = Math.round(p[1]/QEPS);
+    const key = qx + "," + qy;
+    if(!index.has(key)){
+      index.set(key, coords.length);
+      coords.push({x:p[0], y:p[1]});
+    }
+    return index.get(key);
+  }
+
+  for(const poly of polygons){
+    const ids = poly.map(vid);
+    for(let i=0;i<ids.length;i++){
+      let a = ids[i], b = ids[(i+1)%ids.length];
+      if(a===b) continue;
+      if(a>b){ const t=a; a=b; b=t; }
+      edgeSet.add(a + "," + b);
+    }
+  }
+  return {coords, edges:[...edgeSet].map(s=>s.split(",").map(Number))};
+}
+
+function remapGraph(coords, edges, keep){
+  const map = new Int32Array(coords.length);
+  map.fill(-1);
+  keep.forEach((oldIdx,newIdx)=>map[oldIdx]=newIdx);
+
+  const nc = keep.map(i=>({x:coords[i].x, y:coords[i].y}));
+  const ne = [];
+  for(const [a,b] of edges){
+    const aa = map[a], bb = map[b];
+    if(aa>=0 && bb>=0) ne.push([aa,bb]);
+  }
+  return {coords:nc, edges:ne};
+}
+
+function clipToDisc(coords, edges, radius, center={x:0,y:0}){
+  const keep = [];
+  for(let i=0;i<coords.length;i++){
+    const dx = coords[i].x-center.x, dy = coords[i].y-center.y;
+    if(Math.hypot(dx,dy)<=radius+TOL) keep.push(i);
+  }
+  return remapGraph(coords, edges, keep);
+}
+
+function pruneMinDegree(coords, edges, minDegree=2){
+  while(true){
+    const deg = new Int32Array(coords.length);
+    for(const [a,b] of edges){ deg[a]++; deg[b]++; }
+    const keep = [];
+    for(let i=0;i<coords.length;i++) if(deg[i]>=minDegree) keep.push(i);
+    if(keep.length===coords.length) return {coords, edges};
+    ({coords,edges} = remapGraph(coords, edges, keep));
+  }
+}
+
+function largestConnectedComponent(coords, edges){
+  const adj = Array.from({length:coords.length}, ()=>[]);
+  for(const [a,b] of edges){ adj[a].push(b); adj[b].push(a); }
+  const seen = new Uint8Array(coords.length);
+  let best = [];
+
+  for(let s=0;s<coords.length;s++){
+    if(seen[s]) continue;
+    const stack=[s];
+    seen[s]=1;
+    const comp=[];
+    while(stack.length){
+      const u=stack.pop();
+      comp.push(u);
+      for(const v of adj[u]){
+        if(!seen[v]){
+          seen[v]=1;
+          stack.push(v);
+        }
+      }
+    }
+    if(comp.length>best.length) best=comp;
+  }
+  best.sort((a,b)=>a-b);
+  return remapGraph(coords, edges, best);
+}
+
+function translateCoords(coords, dx, dy){
+  return coords.map(p=>({x:p.x+dx, y:p.y+dy}));
+}
+
+function buildBaseGraph(kind, radius){
+  const key = "base:"+kind+":"+radius;
+  if(graphCache.has(key)) return graphCache.get(key);
+
+  let g = buildVertexGraph(makeRhombPolys(kind, radius));
+  g = clipToDisc(g.coords, g.edges, radius, {x:0,y:0});
+  g = pruneMinDegree(g.coords, g.edges, 2);
+  g = largestConnectedComponent(g.coords, g.edges);
+
+  graphCache.set(key, g);
+  return g;
+}
+
+function rotatePoint(dx, dy, angle){
+  const c=Math.cos(angle), s=Math.sin(angle);
+  return {x:c*dx+s*dy, y:-s*dx+c*dy};
+}
+
+function pointInRegularPolygon(x,y,sides,circumRadius,angle){
+  const verts=[];
+  for(let i=0;i<sides;i++){
+    const th = angle + 2*Math.PI*i/sides;
+    verts.push({x:circumRadius*Math.cos(th), y:circumRadius*Math.sin(th)});
+  }
+  let sign=0;
+  for(let i=0;i<sides;i++){
+    const a=verts[i], b=verts[(i+1)%sides];
+    const cross=(b.x-a.x)*(y-a.y)-(b.y-a.y)*(x-a.x);
+    if(Math.abs(cross)<1e-9) continue;
+    const sgn = cross>0 ? 1 : -1;
+    if(sign===0) sign=sgn;
+    else if(sign!==sgn) return false;
+  }
+  return true;
+}
+
+function isInsideShape(pt, center, shape){
+  const dx=pt.x-center.x, dy=pt.y-center.y;
+  if(shape.type==="circle"){
+    return Math.hypot(dx,dy)<=shape.scale+TOL;
+  }
+  if(shape.type==="square"){
+    const q=rotatePoint(dx,dy,shape.angle||0);
+    const half=shape.scale/Math.sqrt(2);
+    return Math.abs(q.x)<=half+TOL && Math.abs(q.y)<=half+TOL;
+  }
+  if(shape.type==="polygon"){
+    return pointInRegularPolygon(dx,dy,shape.sides||6,shape.scale,shape.angle||0);
+  }
+  return false;
+}
+
+function clipByShape(coords, edges, center, shape){
+  const keep = [];
+  for(let i=0;i<coords.length;i++){
+    if(isInsideShape(coords[i],center,shape)) keep.push(i);
+  }
+  return remapGraph(coords, edges, keep);
+}
+
+function extractPatch(baseGraph, center, shape){
+  let g = clipByShape(baseGraph.coords, baseGraph.edges, center, shape);
+  if(g.coords.length===0) return g;
+  g = pruneMinDegree(g.coords, g.edges, 2);
+  if(g.coords.length===0) return g;
+  g = largestConnectedComponent(g.coords, g.edges);
+  g.coords = translateCoords(g.coords, -center.x, -center.y);
+  return g;
+}
+
+function makeRandomPatch(kind, giantRadius, minSites, shapeType, polygonSides){
+  const giant = buildBaseGraph(kind, giantRadius);
+  const candidates = [];
+  const margin = Math.max(2.0, giantRadius*0.45);
+
+  for(const p of giant.coords){
+    if(Math.hypot(p.x,p.y)<=margin) candidates.push(p);
+  }
+  const pool = candidates.length ? candidates : giant.coords;
+
+  let best = null, bestScore = Infinity;
+
+  function shapeLabel(type,sides){
+    if(type==="circle") return "Circle";
+    if(type==="square") return "Square";
+    return "Polygon " + sides;
+  }
+
+  for(let attempt=0; attempt<48; attempt++){
+    const center = pool[(Math.random()*pool.length)|0];
+    const angle = shapeType==="circle" ? 0 : Math.random()*2*Math.PI;
+    let localBest = null;
+
+    for(let scale=6.0; scale<=Math.max(7.0, giantRadius*0.80); scale+=0.5){
+      const shape = {type:shapeType, scale, angle, sides:polygonSides};
+      const patch = extractPatch(giant, center, shape);
+      if(patch.coords.length>=minSites){
+        localBest = {graph:patch, center, shape};
+        break;
+      }
+    }
+
+    if(localBest){
+      const overshoot = localBest.graph.coords.length - minSites;
+      const score = overshoot + 0.15*localBest.shape.scale;
+      if(score<bestScore){
+        bestScore = score;
+        best = localBest;
+      }
+    }
+  }
+
+  if(!best){
+    let fallback=null, fallbackSites=-1;
+    for(let attempt=0; attempt<24; attempt++){
+      const center = pool[(Math.random()*pool.length)|0];
+      const angle = shapeType==="circle" ? 0 : Math.random()*2*Math.PI;
+      for(let scale=6.0; scale<=Math.max(7.0, giantRadius*0.80); scale+=0.5){
+        const shape = {type:shapeType, scale, angle, sides:polygonSides};
+        const patch = extractPatch(giant, center, shape);
+        if(patch.coords.length>fallbackSites){
+          fallbackSites = patch.coords.length;
+          fallback = {graph:patch, center, shape};
+        }
+      }
+    }
+    best = fallback;
+  }
+
+  return {
+    graph:best.graph,
+    meta:{
+      kind,
+      mode:"Random patch",
+      shapeLabel:shapeLabel(shapeType, polygonSides),
+      extra:"from R="+giantRadius+", scale≈"+best.shape.scale.toFixed(1)
+    }
+  };
+}
+
+function makeStandardBoard(kind, radius){
+  const g = buildBaseGraph(kind, radius);
+  return {
+    graph:{
+      coords:g.coords.map(p=>({x:p.x,y:p.y})),
+      edges:g.edges.map(e=>[e[0],e[1]])
+    },
+    meta:{
+      kind,
+      mode:"Standard board",
+      shapeLabel:"Central disc",
+      extra:"radius "+radius
+    }
+  };
+}
+
+/* ---------- game state ---------- */
+const canvas=document.getElementById("board");
+const ctx=canvas.getContext("2d");
+
+let pts=[], edges=[], nbr=[], board=new Int8Array(0);
+let toMove=1, moveNo=0, passCount=0, capB=0, capW=0;
+let gameOver=false, aiBusy=false, lastMove=-1;
+let seen=new Set(), history=[];
+let boardMeta=null;
+let gameMode="ai";
+let scoringRule="territory";
+
+let scoringMode=false;
+let deadMarked=new Uint8Array(0);
+let territoryOwner=new Int8Array(0);
+let scoreReviewData=null;
+
+let view={scale:1, ox:0, oy:0};
+let dragging=false, moved=false, dragStart=null, viewStart=null;
+
+function setGraph(g, meta){
+  pts = g.coords;
+  edges = g.edges;
+  nbr = Array.from({length:pts.length}, ()=>[]);
+  for(const [a,b] of edges){ nbr[a].push(b); nbr[b].push(a); }
+  boardMeta = meta;
+
+  document.getElementById("boardKind").textContent = TILINGS[meta.kind].label;
+  document.getElementById("boardMode").textContent = meta.mode;
+  document.getElementById("boardShape").textContent = meta.shapeLabel || "-";
+  document.getElementById("siteCount").textContent = pts.length;
+  document.getElementById("edgeCount").textContent = edges.length;
+  document.getElementById("boardExtra").textContent = meta.extra || "-";
+
+  newGame();
+  fitBoard();
+}
+
+function hashBoard(arr=board){
+  let s="";
+  for(let i=0;i<arr.length;i++) s += arr[i];
+  return s;
+}
+
+function groupInfo(start, arr=board){
+  const color = arr[start];
+  const stack=[start], vis=new Set([start]), stones=[], libs=new Set();
+  while(stack.length){
+    const u=stack.pop();
+    stones.push(u);
+    for(const v of nbr[u]){
+      if(arr[v]===0) libs.add(v);
+      else if(arr[v]===color && !vis.has(v)){
+        vis.add(v);
+        stack.push(v);
+      }
+    }
+  }
+  return {stones, libs};
+}
+
+function tryMove(i, color, base=board, checkSuperko=true){
+  if(i<0 || base[i]!==0) return null;
+  const arr = new Int8Array(base);
+  arr[i] = color;
+  const opp = 3-color;
+  let captured = [];
+  const checked = new Set();
+
+  for(const v of nbr[i]){
+    if(arr[v]!==opp || checked.has(v)) continue;
+    const g = groupInfo(v, arr);
+    g.stones.forEach(x=>checked.add(x));
+    if(g.libs.size===0){
+      for(const x of g.stones){ arr[x]=0; captured.push(x); }
+    }
+  }
+
+  const mine = groupInfo(i, arr);
+  if(mine.libs.size===0) return null;
+  if(checkSuperko && seen.has(hashBoard(arr))) return null;
+  return {arr, captured, libs:mine.libs.size};
+}
+
+function snapshot(){
+  return {
+    board:new Int8Array(board),
+    toMove, moveNo, passCount, capB, capW, gameOver, lastMove,
+    seen:new Set(seen)
+  };
+}
+
+function clearScoreReviewState(){
+  scoringMode = false;
+  deadMarked = new Uint8Array(board.length);
+  territoryOwner = new Int8Array(board.length);
+  scoreReviewData = null;
+}
+
+function restore(s){
+  board = new Int8Array(s.board);
+  toMove = s.toMove;
+  moveNo = s.moveNo;
+  passCount = s.passCount;
+  capB = s.capB;
+  capW = s.capW;
+  gameOver = s.gameOver;
+  lastMove = s.lastMove;
+  seen = new Set(s.seen);
+  clearScoreReviewState();
+  updateUI();
+  updatePanel();
+  draw();
+}
+
+function play(i, color, fromAI=false){
+  if(gameOver || scoringMode || color!==toMove || (!fromAI && aiBusy)) return false;
+  const r = tryMove(i, color);
+  if(!r){
+    if(!fromAI) msg("Illegal move.");
+    return false;
+  }
+
+  history.push(snapshot());
+  board = r.arr;
+  if(color===1) capB += r.captured.length;
+  else capW += r.captured.length;
+  seen.add(hashBoard());
+  lastMove = i;
+  moveNo++;
+  passCount = 0;
+  toMove = 3-toMove;
+
+  updateUI();
+  updatePanel();
+  draw();
+
+  if(gameMode==="ai" && toMove===2 && !fromAI) scheduleAI();
+  return true;
+}
+
+function doPass(color, fromAI=false){
+  if(gameOver || scoringMode || color!==toMove) return;
+
+  history.push(snapshot());
+  moveNo++;
+  passCount++;
+  lastMove = -1;
+  toMove = 3-toMove;
+
+  if(passCount>=2){
+    enterScoreReview("Two consecutive passes");
+    return;
+  }
+
+  updateUI();
+  updatePanel();
+  draw();
+
+  if(gameMode==="ai" && toMove===2 && !fromAI) scheduleAI();
+}
+
+function enterScoreReview(reason="Manual score review"){
+  if(gameOver) return;
+  scoringMode = true;
+  if(deadMarked.length!==board.length) deadMarked = new Uint8Array(board.length);
+  recomputeScoreReview();
+  msg(`${reason} — Click a connected group to mark/unmark dead stones, then finalize or resume.`);
+  updateUI();
+  draw();
+}
+
+function resumePlayFromScoreReview(){
+  if(!scoringMode || gameOver) return;
+  clearScoreReviewState();
+  msg("Resumed play.");
+  updateUI();
+  updatePanel();
+  draw();
+}
+
+function finalizeScore(){
+  if(!scoringMode || gameOver) return;
+  recomputeScoreReview();
+  gameOver = true;
+  const sc = scoreReviewData;
+  const diff = sc.b - sc.w;
+  const lead = Math.abs(diff).toFixed(1);
+  const winner = diff>=0 ? `Black +${lead}` : `White +${lead}`;
+  msg(`Final score — Black ${sc.b.toFixed(1)} : White ${sc.w.toFixed(1)} · ${winner}`);
+  updateUI();
+  updatePanel();
+  draw();
+}
+
+function boardAfterRemovingDead(){
+  const arr = new Int8Array(board);
+  for(let i=0;i<arr.length;i++){
+    if(deadMarked[i]) arr[i]=0;
+  }
+  return arr;
+}
+
+function scoreReviewedPosition(arr){
+  let blackTerritory=0, whiteTerritory=0, neutral=0;
+  let liveBlack=0, liveWhite=0, deadB=0, deadW=0;
+
+  territoryOwner = new Int8Array(arr.length);
+
+  for(let i=0;i<board.length;i++){
+    if(board[i]===1 && deadMarked[i]) deadB++;
+    if(board[i]===2 && deadMarked[i]) deadW++;
+  }
+
+  for(const x of arr){
+    if(x===1) liveBlack++;
+    else if(x===2) liveWhite++;
+  }
+
+  const vis = new Uint8Array(arr.length);
+
+  for(let i=0;i<arr.length;i++){
+    if(arr[i]!==0 || vis[i]) continue;
+
+    const stack=[i];
+    vis[i]=1;
+    const comp=[];
+    const border=new Set();
+
+    while(stack.length){
+      const u=stack.pop();
+      comp.push(u);
+      for(const v of nbr[u]){
+        if(arr[v]===0 && !vis[v]){
+          vis[v]=1;
+          stack.push(v);
+        }else if(arr[v]!==0){
+          border.add(arr[v]);
+        }
+      }
+    }
+
+    if(border.size===1){
+      const owner=[...border][0];
+      for(const u of comp) territoryOwner[u]=owner;
+      if(owner===1) blackTerritory += comp.length;
+      else whiteTerritory += comp.length;
+    }else{
+      neutral += comp.length;
+    }
+  }
+
+  let b,w;
+  if(scoringRule==="territory"){
+    // Korean/Japanese-style territory scoring:
+    // territory + prisoners/captured stones + dead stones, komi 6.5 to White.
+    b = blackTerritory + capB + deadW;
+    w = whiteTerritory + capW + deadB + 6.5;
+  }else{
+    // Chinese-style area scoring:
+    // living stones + territory, komi 7.5 to White.
+    b = liveBlack + blackTerritory;
+    w = liveWhite + whiteTerritory + 7.5;
+  }
+
+  return {
+    b,w,neutral,deadB,deadW,
+    blackTerritory,whiteTerritory,
+    liveBlack,liveWhite
+  };
+}
+
+function recomputeScoreReview(){
+  const arr = boardAfterRemovingDead();
+  scoreReviewData = scoreReviewedPosition(arr);
+  updatePanel();
+}
+
+function toggleDeadGroup(i){
+  if(!scoringMode || gameOver) return;
+  if(board[i]===0) return;
+  const g = groupInfo(i, board);
+  const newVal = deadMarked[i] ? 0 : 1;
+  for(const x of g.stones) deadMarked[x] = newVal;
+  recomputeScoreReview();
+  draw();
+}
+
+function estimatePosition(){
+  let b=0,w=(scoringRule==="territory"?6.5:7.5),neutral=0;
+
+  function multiSourceDistances(color){
+    const INF=1e9;
+    const dist = new Int32Array(board.length);
+    for(let i=0;i<dist.length;i++) dist[i]=INF;
+    const q=[];
+    let head=0;
+    for(let i=0;i<board.length;i++){
+      if(board[i]===color){ dist[i]=0; q.push(i); }
+    }
+    while(head<q.length){
+      const u=q[head++];
+      const nd=dist[u]+1;
+      for(const v of nbr[u]){
+        if(nd<dist[v]){
+          dist[v]=nd;
+          q.push(v);
+        }
+      }
+    }
+    return dist;
+  }
+
+  const dB = multiSourceDistances(1);
+  const dW = multiSourceDistances(2);
+
+  for(let i=0;i<board.length;i++){
+    if(board[i]===1){ b++; continue; }
+    if(board[i]===2){ w++; continue; }
+    const db=dB[i], dw=dW[i];
+    if(db>=1e9 && dw>=1e9){ neutral++; continue; }
+    if(db>=1e9){ w++; continue; }
+    if(dw>=1e9){ b++; continue; }
+    if(db+1<dw) b++;
+    else if(dw+1<db) w++;
+    else neutral++;
+  }
+  return {b,w,neutral,deadB:0,deadW:0};
+}
+
+function updatePanel(){
+  let panelData, modeText;
+  if(scoringMode || gameOver){
+    if(!scoreReviewData) recomputeScoreReview();
+    panelData = scoreReviewData;
+    const ruleBadge = scoringRule==="territory" ? "Territory 6.5" : "Chinese area 7.5";
+    modeText = gameOver
+      ? `<span class="badge">Final · ${ruleBadge}</span>`
+      : `<span class="badge">Review · ${ruleBadge}</span>`;
+  }else{
+    panelData = estimatePosition();
+    modeText = scoringRule==="territory"
+      ? '<span class="badge">Estimate · Territory 6.5</span>'
+      : '<span class="badge">Estimate · Chinese area 7.5</span>';
+  }
+
+  document.getElementById("panelB").textContent = panelData.b.toFixed(1);
+  document.getElementById("panelW").textContent = panelData.w.toFixed(1);
+  document.getElementById("panelN").textContent = panelData.neutral;
+  document.getElementById("panelDeadB").textContent = panelData.deadB;
+  document.getElementById("panelDeadW").textContent = panelData.deadW;
+  document.getElementById("panelMode").innerHTML = modeText;
+
+  const diff = panelData.b - panelData.w;
+  document.getElementById("panelLead").textContent =
+    Math.abs(diff)<0.05 ? "Approximately even" :
+    (diff>0 ? `Black +${Math.abs(diff).toFixed(1)}` : `White +${Math.abs(diff).toFixed(1)}`);
+}
+
+/* ---------- AI ---------- */
+function scheduleAI(){
+  aiBusy=true;
+  msg("AI thinking...");
+  updateUI();
+  setTimeout(()=>{
+    aiMove();
+    aiBusy=false;
+    updateUI();
+  }, 50);
+}
+
+function getApproxBoardRadius(){
+  let mx=1;
+  for(const p of pts) mx=Math.max(mx,Math.hypot(p.x,p.y));
+  return mx;
+}
+
+function aiMove(){
+  if(gameOver || scoringMode || gameMode!=="ai" || toMove!==2) return;
+
+  const empties=[];
+  for(let i=0;i<board.length;i++) if(board[i]===0) empties.push(i);
+  if(!empties.length){
+    doPass(2,true);
+    return;
+  }
+
+  const candidate=new Set();
+  for(let i=0;i<board.length;i++){
+    if(board[i]!==0){
+      for(const v of nbr[i]) if(board[v]===0) candidate.add(v);
+      const g=groupInfo(i, board);
+      if(g.libs.size<=2) for(const v of g.libs) candidate.add(v);
+    }
+  }
+  for(let k=0;k<Math.min(160,empties.length);k++){
+    candidate.add(empties[(Math.random()*empties.length)|0]);
+  }
+
+  let best=-1,bestScore=-1e9;
+  for(const i of candidate){
+    const r=tryMove(i,2);
+    if(!r) continue;
+
+    let s=26*r.captured.length + 2.2*r.libs;
+    let own=0,enemy=0,empty=0;
+
+    for(const v of nbr[i]){
+      if(r.arr[v]===2) own++;
+      else if(r.arr[v]===1) enemy++;
+      else empty++;
+    }
+    s += 1.2*own + 1.1*enemy + 0.2*empty;
+    if(r.libs===1) s -= 8;
+
+    const checked=new Set();
+    for(const v of nbr[i]){
+      if(r.arr[v]!==1 || checked.has(v)) continue;
+      const g=groupInfo(v,r.arr);
+      g.stones.forEach(x=>checked.add(x));
+      if(g.libs.size===1) s += 5 + 0.6*g.stones.length;
+    }
+
+    const radial=Math.hypot(pts[i].x,pts[i].y);
+    s += 1.0*(1-radial/Math.max(1,getApproxBoardRadius()));
+    s += Math.random()*2;
+
+    if(s>bestScore){
+      bestScore=s;
+      best=i;
+    }
+  }
+
+  if(best<0) doPass(2,true);
+  else play(best,2,true);
+}
+
+/* ---------- general state ---------- */
+function newGame(){
+  board = new Int8Array(pts.length);
+  toMove = 1;
+  moveNo = 0;
+  passCount = 0;
+  capB = 0;
+  capW = 0;
+  gameOver = false;
+  aiBusy = false;
+  lastMove = -1;
+  history = [];
+  seen = new Set([hashBoard()]);
+  clearScoreReviewState();
+  msg(gameMode==="ai" ? "Black to play. You are Black." : "Black to play. Local manual mode.");
+  updateUI();
+  updatePanel();
+  draw();
+}
+
+function undoMove(){
+  if(aiBusy || scoringMode || history.length===0) return;
+  if(gameMode==="ai"){
+    let s = history.pop();
+    while(history.length && s.toMove!==1) s = history.pop();
+    restore(s);
+  }else{
+    restore(history.pop());
+  }
+  msg("Undone.");
+}
+
+function msg(t){ document.getElementById("status").textContent = t; }
+
+function updateUI(){
+  document.getElementById("moveNo").textContent = moveNo;
+  document.getElementById("capB").textContent = capB;
+  document.getElementById("capW").textContent = capW;
+  document.getElementById("passes").textContent = passCount;
+  document.getElementById("turnText").textContent =
+    gameOver ? "Finished" : (toMove===1 ? "Black" : "White");
+  document.getElementById("turnDot").className = "dot " + (toMove===1 ? "black" : "white");
+  document.getElementById("scoringState").textContent =
+    gameOver ? "Finalized" : (scoringMode ? "Reviewing" : "Playing");
+
+  const humanCanPass = !gameOver && !aiBusy && !scoringMode && (gameMode==="local" || (gameMode==="ai" && toMove===1));
+  document.getElementById("passBtn").disabled = !humanCanPass;
+  document.getElementById("scoreReviewBtn").disabled = gameOver || aiBusy || scoringMode;
+  document.getElementById("finalizeBtn").disabled = !scoringMode || gameOver;
+  document.getElementById("resumeBtn").disabled = !scoringMode || gameOver;
+  document.getElementById("undoBtn").disabled = aiBusy || scoringMode || history.length===0;
+}
+
+/* ---------- drawing ---------- */
+function resizeCanvas(){
+  const r=canvas.getBoundingClientRect();
+  const dpr=Math.min(devicePixelRatio||1,2);
+  canvas.width=Math.max(1,Math.round(r.width*dpr));
+  canvas.height=Math.max(1,Math.round(r.height*dpr));
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  draw();
+}
+
+function fitBoard(){
+  const r=canvas.getBoundingClientRect(), pad=35;
+  let minx=Infinity,miny=Infinity,maxx=-Infinity,maxy=-Infinity;
+  for(const p of pts){
+    if(p.x<minx) minx=p.x;
+    if(p.x>maxx) maxx=p.x;
+    if(p.y<miny) miny=p.y;
+    if(p.y>maxy) maxy=p.y;
+  }
+  view.scale=Math.min(
+    (r.width-2*pad)/Math.max(1e-6,maxx-minx),
+    (r.height-2*pad)/Math.max(1e-6,maxy-miny)
+  );
+  view.ox=r.width/2-view.scale*(minx+maxx)/2;
+  view.oy=r.height/2-view.scale*(miny+maxy)/2;
+  draw();
+}
+
+function screenPos(p){ return {x:p.x*view.scale+view.ox, y:p.y*view.scale+view.oy}; }
+function worldPos(x,y){ return {x:(x-view.ox)/view.scale, y:(y-view.oy)/view.scale}; }
+
+function nearestSite(x,y){
+  const p=worldPos(x,y);
+  const lim=16/view.scale;
+  let bi=-1, bd=lim*lim;
+  for(let i=0;i<pts.length;i++){
+    const dx=pts[i].x-p.x, dy=pts[i].y-p.y;
+    const d=dx*dx+dy*dy;
+    if(d<bd){ bd=d; bi=i; }
+  }
+  return bi;
+}
+
+function drawTerritoryMarker(x, y, owner, rad){
+  if(owner===1){
+    ctx.fillStyle="rgba(0,0,0,0.60)";
+    ctx.beginPath();
+    ctx.arc(x,y,rad*0.56,0,Math.PI*2);
+    ctx.fill();
+  }else if(owner===2){
+    ctx.fillStyle="rgba(255,255,255,0.95)";
+    ctx.strokeStyle="rgba(0,0,0,0.28)";
+    ctx.lineWidth=1;
+    ctx.beginPath();
+    ctx.arc(x,y,rad*0.56,0,Math.PI*2);
+    ctx.fill();
+    ctx.stroke();
+  }
+}
+
+function drawDeadX(x, y, rad){
+  ctx.strokeStyle="rgba(220,35,35,0.95)";
+  ctx.lineWidth=Math.max(1.4, rad*0.22);
+  ctx.beginPath();
+  ctx.moveTo(x-rad*0.70, y-rad*0.70);
+  ctx.lineTo(x+rad*0.70, y+rad*0.70);
+  ctx.moveTo(x-rad*0.70, y+rad*0.70);
+  ctx.lineTo(x+rad*0.70, y-rad*0.70);
+  ctx.stroke();
+}
+
+function draw(){
+  const r=canvas.getBoundingClientRect();
+  ctx.clearRect(0,0,r.width,r.height);
+  ctx.fillStyle=getComputedStyle(document.documentElement).getPropertyValue("--wood").trim() || "#c99d63";
+  ctx.fillRect(0,0,r.width,r.height);
+
+  ctx.strokeStyle=getComputedStyle(document.documentElement).getPropertyValue("--line").trim() || "#70583b";
+  ctx.lineWidth=Math.max(0.9,Math.min(1.9,view.scale*0.024));
+  ctx.globalAlpha=0.82;
+  ctx.beginPath();
+  for(const [a,b] of edges){
+    const A=screenPos(pts[a]), B=screenPos(pts[b]);
+    ctx.moveTo(A.x,A.y);
+    ctx.lineTo(B.x,B.y);
+  }
+  ctx.stroke();
+  ctx.globalAlpha=1;
+
+  // Slightly enlarged stones for visibility.
+  const rad=Math.max(3.2,Math.min(9.4,view.scale*0.145));
+
+  // Territory markers first (score review / final only).
+  if(scoringMode || gameOver){
+    for(let i=0;i<pts.length;i++){
+      const owner = territoryOwner[i];
+      if(!owner) continue;
+      const s=screenPos(pts[i]);
+      if(s.x<-12 || s.y<-12 || s.x>r.width+12 || s.y>r.height+12) continue;
+      drawTerritoryMarker(s.x, s.y, owner, rad);
+    }
+  }
+
+  for(let i=0;i<pts.length;i++){
+    const s=screenPos(pts[i]);
+    if(s.x<-12 || s.y<-12 || s.x>r.width+12 || s.y>r.height+12) continue;
+
+    if(board[i]===0){
+      ctx.fillStyle="#4c3923";
+      ctx.beginPath();
+      ctx.arc(s.x,s.y,Math.max(1.0,rad*0.16),0,Math.PI*2);
+      ctx.fill();
+    }else{
+      const isDead = (scoringMode || gameOver) && deadMarked[i];
+      ctx.globalAlpha = isDead ? 0.42 : 1.0;
+
+      ctx.beginPath();
+      ctx.arc(s.x,s.y,rad,0,Math.PI*2);
+      ctx.fillStyle = board[i]===1 ? "#111" : "#f4f0e7";
+      ctx.fill();
+      ctx.strokeStyle = board[i]===1 ? "#000" : "#777";
+      ctx.lineWidth = 1.15;
+      ctx.stroke();
+
+      if(i===lastMove && !isDead){
+        ctx.beginPath();
+        ctx.arc(s.x,s.y,rad*0.30,0,Math.PI*2);
+        ctx.fillStyle = board[i]===1 ? "#f4f0e7" : "#222";
+        ctx.fill();
+      }
+
+      ctx.globalAlpha = 1.0;
+
+      if(isDead){
+        drawDeadX(s.x, s.y, rad);
+      }
+    }
+  }
+}
+
+/* ---------- interaction ---------- */
+canvas.addEventListener("pointerdown",e=>{
+  canvas.setPointerCapture(e.pointerId);
+  dragging=true;
+  moved=false;
+  dragStart={x:e.clientX,y:e.clientY};
+  viewStart={ox:view.ox,oy:view.oy};
+});
+
+canvas.addEventListener("pointermove",e=>{
+  if(!dragging) return;
+  const dx=e.clientX-dragStart.x, dy=e.clientY-dragStart.y;
+  if(Math.hypot(dx,dy)>4) moved=true;
+  if(moved){
+    view.ox=viewStart.ox+dx;
+    view.oy=viewStart.oy+dy;
+    draw();
+  }
+});
+
+canvas.addEventListener("pointerup",e=>{
+  if(!dragging) return;
+  dragging=false;
+
+  if(moved || aiBusy) return;
+  const r=canvas.getBoundingClientRect();
+  const i=nearestSite(e.clientX-r.left, e.clientY-r.top);
+  if(i<0) return;
+
+  if(scoringMode && !gameOver){
+    if(board[i]!==0) toggleDeadGroup(i);
+    return;
+  }
+
+  const canHumanPlay = !gameOver && !scoringMode && (gameMode==="local" || (gameMode==="ai" && toMove===1));
+  if(canHumanPlay){
+    play(i, toMove, false);
+  }
+});
+
+canvas.addEventListener("wheel",e=>{
+  e.preventDefault();
+  const r=canvas.getBoundingClientRect();
+  const mx=e.clientX-r.left, my=e.clientY-r.top;
+  const before=worldPos(mx,my);
+  view.scale=Math.max(18,Math.min(1800,view.scale*Math.exp(-e.deltaY*0.0012)));
+  view.ox=mx-before.x*view.scale;
+  view.oy=my-before.y*view.scale;
+  draw();
+},{passive:false});
+
+/* ---------- UI controls ---------- */
+const gameModeSelect=document.getElementById("gameModeSelect");
+const themeSelect=document.getElementById("themeSelect");
+const rulesSelect=document.getElementById("rulesSelect");
+const tilingSelect=document.getElementById("tilingSelect");
+const radiusInput=document.getElementById("radiusInput");
+const giantRadiusInput=document.getElementById("giantRadiusInput");
+const minSitesInput=document.getElementById("minSitesInput");
+const shapeSelect=document.getElementById("shapeSelect");
+const polygonSidesWrap=document.getElementById("polygonSidesWrap");
+const polygonSidesInput=document.getElementById("polygonSidesInput");
+
+function updateModeUI(){
+  gameMode=gameModeSelect.value;
+  document.getElementById("modeNote").textContent =
+    gameMode==="ai"
+      ? "AI mode: you play Black; White is controlled by the heuristic AI."
+      : "Local manual mode: no AI. Black and White alternate automatically for solo/manual or friend play.";
+  if(board.length) newGame();
+}
+
+function updateThemeUI(){
+  const theme = themeSelect.value;
+  document.body.classList.toggle("light", theme==="light");
+  document.getElementById("themeNote").textContent =
+    theme==="light"
+      ? "Light mode is active: bright panels and controls with the same board geometry."
+      : "Dark mode is active: dark panels and controls with the same board geometry.";
+  draw();
+}
+
+function updateRulesUI(){
+  scoringRule = rulesSelect.value;
+  if(scoringRule==="territory"){
+    document.getElementById("rulesNote").textContent =
+      "Territory scoring: territory + captured/dead stones; komi 6.5.";
+    document.getElementById("currentRules").textContent = "Territory 6.5";
+  }else{
+    document.getElementById("rulesNote").textContent =
+      "Chinese area scoring: living stones + territory; komi 7.5.";
+    document.getElementById("currentRules").textContent = "Chinese area 7.5";
+  }
+
+  if(scoringMode || gameOver){
+    recomputeScoreReview();
+  }else{
+    updatePanel();
+  }
+  draw();
+}
+
+function updateShapeUI(){
+  polygonSidesWrap.style.display = shapeSelect.value==="polygon" ? "block" : "none";
+}
+
+function currentKind(){ return tilingSelect.value; }
+function currentRadius(){ return Math.max(4, Math.round(+radiusInput.value||10)); }
+function currentGiantRadius(){ return Math.max(12, Math.round(+giantRadiusInput.value||24)); }
+function currentMinSites(){ return Math.max(360, Math.round(+minSitesInput.value||360)); }
+function currentShape(){ return shapeSelect.value; }
+function currentPolygonSides(){ return Math.min(12, Math.max(5, Math.round(+polygonSidesInput.value||6))); }
+
+function generateStandard(){
+  const out = makeStandardBoard(currentKind(), currentRadius());
+  setGraph(out.graph, out.meta);
+}
+
+function generateRandomPatch(){
+  msg("Generating random patch...");
+  setTimeout(()=>{
+    const out = makeRandomPatch(
+      currentKind(),
+      currentGiantRadius(),
+      currentMinSites(),
+      currentShape(),
+      currentPolygonSides()
+    );
+    setGraph(out.graph, out.meta);
+  },20);
+}
+
+gameModeSelect.addEventListener("change", updateModeUI);
+themeSelect.addEventListener("change", updateThemeUI);
+rulesSelect.addEventListener("change", updateRulesUI);
+tilingSelect.addEventListener("change", ()=>{
+  radiusInput.value = TILINGS[currentKind()].defaultRadius;
+});
+shapeSelect.addEventListener("change", updateShapeUI);
+
+document.getElementById("fixedBtn").onclick = generateStandard;
+document.getElementById("randomBtn").onclick = generateRandomPatch;
+document.getElementById("rerandomBtn").onclick = generateRandomPatch;
+
+document.getElementById("passBtn").onclick = ()=>doPass(toMove,false);
+document.getElementById("scoreReviewBtn").onclick = ()=>enterScoreReview("Manual score review");
+document.getElementById("finalizeBtn").onclick = finalizeScore;
+document.getElementById("resumeBtn").onclick = resumePlayFromScoreReview;
+document.getElementById("undoBtn").onclick = undoMove;
+document.getElementById("fitBtn").onclick = fitBoard;
+document.getElementById("newBtn").onclick = ()=>{
+  if(confirm("Start a new game?")) newGame();
+};
+document.getElementById("estimateBtn").onclick = updatePanel;
+
+addEventListener("resize", resizeCanvas);
+
+/* ---------- init ---------- */
+updateShapeUI();
+gameMode = gameModeSelect.value;
+scoringRule = rulesSelect.value;
+updateThemeUI();
+updateRulesUI();
+resizeCanvas();
+generateStandard();
+setTimeout(fitBoard,0);
+</script>
+</body>
+</html>
